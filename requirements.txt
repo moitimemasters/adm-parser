@@ -1,0 +1,4 @@
+pyopenpyxl
+bs4
+requests
+lxml
