@@ -54,8 +54,8 @@ def export_to_excel(table, filename="adm.xlsx"):
     applied.cell(row=1, column=1, value="СНИЛС")
     applied.cell(row=1, column=2, value="Программа")
     for idx, snils in enumerate(table["СНИЛС"]):
-        others.cell(row=idx + 2, column=1, value=snils)
-        others.cell(row=idx + 2, column=2, value=table["Поданная программа"][idx])
+        applied.cell(row=idx + 2, column=1, value=snils)
+        applied.cell(row=idx + 2, column=2, value=table["Поданная программа"][idx])
         
     wb.save(filename)
 
