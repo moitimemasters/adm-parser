@@ -50,7 +50,7 @@ def export_to_excel(table, filename="adm.xlsx"):
             total += 1
             others.cell(row=total, column=1, value=snils)
             others.cell(row=total, column=2, value=program)
-    applied = wb.create_chartsheet("Поданные документы")
+    applied = wb.create_sheet("Поданные документы")
     applied.cell(row=1, column=1, value="СНИЛС")
     applied.cell(row=1, column=2, value="Программа")
     for idx, snils in enumerate(table["СНИЛС"]):
