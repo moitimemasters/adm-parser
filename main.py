@@ -1,63 +1,83 @@
 import requests
 from bs4 import BeautifulSoup as BS
 from openpyxl import Workbook
-import sys
+import time
+from multiprocessing.pool import ThreadPool as Pool
 
-URL, filename, *_ = sys.argv[1:]
+def get_all_universities():
+    URL = "http://admlist.ru"
+    page = requests.get(URL)
+    page.encoding = "utf-8"
+    page = page.text
 
-page = requests.get(URL)
-page.encoding = "utf-8"
-page = page.text
+    bs = BS(page, "lxml")
+    universitys_table_body = bs.find_all("table")[-1].tbody
+    anchors = universitys_table_body.find_all("a", recursive=True)
+    for a in anchors:
+        yield a.text.strip(), URL + "/" + a.get("href")
 
-bs = BS(page, "lxml")
 
-def parse_adm_table(table):
-    headers = [th.text for th in table.thead.tr.find_all("th")]
-    result = {header:[] for header in headers}
-    result["Поданная программа"] = []
+def get_all_programs(university_link):
+    page = requests.get(university_link)
+    page.encoding = "utf-8"
+    page = page.text
+
+    bs = BS(page, "lxml")
+    programs_table_body = bs.find_all("table")[-1].tbody
+    anchors = programs_table_body.find_all("a", recursive=True)
+    for a in anchors:
+        full_program, *direction = a.text.split(",")
+        *program_name, slug = full_program.split(" ")
+        program_name = " ".join(program_name)
+        slug = slug[1:-1]
+        short_link = a.get("href")
+        *university_app_link, _ = university_link.split("/")
+        full_link = "/".join(university_app_link) + "/" + short_link
+        yield program_name.strip(), slug.strip(), direction[0].strip() if direction else None, full_link
+
+
+def parse_program(program_link):
+    page = requests.get(program_link)
+    page.encoding = "utf-8"
+    page = page.text
+
+    bs = BS(page, "lxml")
+    table = bs.find_all("table")[-1]
+    headers = table.thead.tr.find_all("th")[3:-2]
+    yield [th.text.strip() for th in headers]
     for row in table.tbody.find_all("tr"):
         tds = row.find_all("td")
-        for idx, td in enumerate(tds[:-1]):
-            result[headers[idx]].append(td.text)
-        result[headers[-1]].append([a.text for a in tds[-1].find_all("a", recursive=True)])
-        app = tds[-1].find("b", recursive=True)
-        app = app.text if app else "-"
-        result["Поданная программа"].append(app)
-    return result, headers
-
-table = bs.find_all("table")[-1]
-dct, headers = parse_adm_table(table)
-
-def export_to_excel(table, filename="adm.xlsx"):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Конкурсный список"
-    for idx, header in enumerate(list(table.keys())[:-2]):
-        ws.cell(row=1, column=idx + 1, value=header)
-    
-    headers = list(table.keys())[:-2]
-
-    for row in range(len(table[headers[0]])):
-        for column in range(len(headers)):
-            ws.cell(row=row + 2, column=column + 1, value=table[headers[column]][row])
-    
-    others = wb.create_sheet("Другие ОП")
-    others.cell(row=1, column=1, value="СНИЛС")
-    others.cell(row=1, column=2, value="Программа")
-    total = 1
-    for idx, snils in enumerate(table["СНИЛС"]):
-        for program in table["Другие ОП"][idx]:
-            total += 1
-            others.cell(row=total, column=1, value=snils)
-            others.cell(row=total, column=2, value=program)
-    applied = wb.create_sheet("Поданные документы")
-    applied.cell(row=1, column=1, value="СНИЛС")
-    applied.cell(row=1, column=2, value="Программа")
-    for idx, snils in enumerate(table["СНИЛС"]):
-        applied.cell(row=idx + 2, column=1, value=snils)
-        applied.cell(row=idx + 2, column=2, value=table["Поданная программа"][idx])
-        
-    wb.save(filename)
+        yield list(map(lambda x: x.text.strip(), tds[3:-2]))
 
 
-export_to_excel(dct, filename)
+pool = Pool(5)
+start = time.time()
+
+def export(uname, pname, slug, direction, plink):
+    print(f"Parsing {uname}.{pname}({slug}).{direction}", end=": ")
+    try:
+        direction = direction if direction is not None else pname
+        parsed = parse_program(plink)
+        headers = next(parsed)
+        wb = Workbook()
+        ws = wb.active
+        for idx, header in enumerate(headers):
+            ws.cell(row=1, column=idx + 1, value=header)
+        for row, (snils, att, app_type, *exams) in enumerate(parsed):
+            ws.cell(row=row + 2, column=1, value=snils)
+            ws.cell(row=row + 2, column=2, value=att)
+            ws.cell(row=row + 2, column=3, value=app_type)
+            for col, result in enumerate(exams):
+                ws.cell(row + 2, column=col + 4, value=int(result))
+        wb.save(f"{uname}.{slug}.{direction}.xlsx")
+        print("parsed.")
+    except:
+        print("error")
+
+for uname, ulink in get_all_universities():
+    for pname, slug, direction, plink in get_all_programs(ulink):
+        pool.apply_async(export, (uname, pname, slug, direction, plink))
+            
+pool.close()
+pool.join()
+            
